@@ -27,7 +27,7 @@ RENAME = os.getenv("RENAME", "output.mp4")
 CHAT_ID = int(os.getenv("CHAT_ID", "0"))
 THREAD_ID = os.getenv("THREAD_ID", "none")
 
-# Initial Defaults
+# Default settings
 CRF = "34"
 PRESET = "ultrafast"
 
@@ -37,7 +37,7 @@ RESOLUTION = "original"
 ORIG_NAME = RENAME
 VIDEO_MSG_ID = None
 
-# Extracting all packed variables from dump_id string
+# Unpacking packed variables from dump_id
 if ":::" in raw_dump:
     parts = raw_dump.split(":::")
     DUMP_ID = parts[0]
@@ -85,23 +85,19 @@ async def progress_bar(current, total, app, msg_id, action_text, current_file_na
             speed = current / elapsed if elapsed > 0 else 0
             eta = get_readable_time((total - current) / speed) if speed > 0 else "0s"
             text = (f"🎬 " + sc("ᴄʟᴏᴜᴅ ᴡᴏʀᴋᴇʀ") + f"\n▸ {action_text}\n📊 [{bar}] {perc:.2f}%\n🚀 {speed/(1024*1024):.2f} MB/s\n⏱ ETA: {eta}")
-            await app.edit_message_text(CHAT_ID, msg_id, text)
-            last_edit_time = now
+            await app.edit_message_text(CHAT_ID, msg_id, text); last_edit_time = now
         except: pass
 
 async def download_phase():
-    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-    await app.start()
+    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN); await app.start()
     msg_id = int(STATUS_MSG_ID) if STATUS_MSG_ID else (await app.send_message(CHAT_ID, sc("⚙️ Wᴏʀᴋᴇʀ Pʀᴇᴘᴀʀɪɴɢ..."))).id
     v_path = await app.download_media(VIDEO_ID, file_name="video.mkv", progress=progress_bar, progress_args=(app, msg_id, "Dᴏᴡɴʟᴏᴀᴅɪɴɢ Vɪᴅᴇᴏ", ORIG_NAME, time.time()))
     s_path = await app.download_media(SUB_ID, progress=progress_bar, progress_args=(app, msg_id, "Dᴏᴡɴʟᴏᴀᴅɪɴɢ Sᴜʙ", ORIG_NAME, time.time())) if SUB_ID != "none" else None
     l_path = await app.download_media(LOGO_ID, progress=progress_bar, progress_args=(app, msg_id, "Dᴏᴡɴʟᴏᴀᴅɪɴɢ Lᴏɢᴏ", ORIG_NAME, time.time())) if LOGO_ID != "none" else None
-    await app.stop()
-    return v_path, s_path, l_path, msg_id
+    await app.stop(); return v_path, s_path, l_path, msg_id
 
 async def encode_phase(video_path, sub_path, logo_path, msg_id):
-    duration = await get_duration(video_path)
-    output = RENAME
+    duration = await get_duration(video_path); output = RENAME
     if TASK_TYPE == "hardsub":
         abs_sub = os.path.abspath(sub_path).replace('\\', '/').replace(':', '\\:') if sub_path else ""
         sub_filter = f"subtitles='{abs_sub}'" if abs_sub else ""
@@ -115,8 +111,7 @@ async def encode_phase(video_path, sub_path, logo_path, msg_id):
         vf = f"scale=-2:{RESOLUTION}" if RESOLUTION != "original" else "copy"
         cmd = ['ffmpeg', '-y', '-i', video_path, '-vf', vf, '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-c:s', 'copy', '-progress', 'pipe:1', output]
 
-    app = Client("worker_enc", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-    await app.start()
+    app = Client("worker_enc", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN); await app.start()
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE)
     while True:
         line = await proc.stdout.readline()
@@ -126,19 +121,15 @@ async def encode_phase(video_path, sub_path, logo_path, msg_id):
             cur = int(line.split('=')[1]) / 1000000
             if duration > 0 and (time.time() - last_edit_time) > 10:
                 perc = (cur / duration) * 100
-                await app.edit_message_text(CHAT_ID, msg_id, f"🎬 " + sc("ᴇɴᴄᴏᴅɪɴɢ") + f" {perc:.2f}%\n🚀 {PRESET} | CRF {CRF}")
-    await proc.wait()
-    await app.stop()
-    return output, proc.returncode
+                await app.edit_message_text(CHAT_ID, msg_id, f"🎬 " + sc("ᴇɴᴄᴏᴅɪɴɢ") + f" {perc:.2f}%\n🚀 {PRESET} | CRF {CRF}"); last_edit_time = time.time()
+    await proc.wait(); await app.stop(); return output, proc.returncode
 
 async def upload_phase(output, returncode, msg_id):
     if returncode != 0 or not os.path.exists(output): return
-    app = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-    await app.start()
+    app = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN); await app.start()
     target_chat = int(DUMP_ID) if DUMP_ID != "none" else CHAT_ID
     await app.send_document(chat_id=target_chat, document=output, caption=sc("Pʀᴏᴄᴇss Cᴏᴍᴘʟᴇᴛᴇ! 👑"), progress=progress_bar, progress_args=(app, msg_id, "Uᴘʟᴏᴀᴅɪɴɢ", RENAME, time.time()))
-    await app.delete_messages(CHAT_ID, [msg_id])
-    await app.stop()
+    await app.delete_messages(CHAT_ID, [msg_id]); await app.stop()
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
