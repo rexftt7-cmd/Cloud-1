@@ -29,19 +29,36 @@ THREAD_ID = os.getenv("THREAD_ID", "none")
 
 raw_dump = os.getenv("DUMP_ID", "none")
 STATUS_MSG_ID = None
+
+# Default Profile Variables
+CODEC = "libx264"
+CRF = "34"
+PRESET = "ultrafast"
+POS = "Center"
+SIZE = "10"
+MARGIN = "10"
 RESOLUTION = "original"
 ORIG_NAME = RENAME
 VIDEO_MSG_ID = None
+FONT_IDS =[]
 
 if ":::" in raw_dump:
     parts = raw_dump.split(":::")
     DUMP_ID = parts[0]
-    if len(parts) > 1: LOGO_ID = parts[1]
-    else: LOGO_ID = "none"
-    if len(parts) > 2: STATUS_MSG_ID = parts[2]
-    if len(parts) > 3: RESOLUTION = parts[3]
-    if len(parts) > 4: ORIG_NAME = parts[4]
-    if len(parts) > 5: VIDEO_MSG_ID = parts[5]
+    LOGO_ID = parts[1] if len(parts) > 1 else "none"
+    STATUS_MSG_ID = parts[2] if len(parts) > 2 else None
+    RESOLUTION = parts[3] if len(parts) > 3 else "original"
+    ORIG_NAME = parts[4] if len(parts) > 4 else RENAME
+    VIDEO_MSG_ID = parts[5] if len(parts) > 5 else None
+    
+    CODEC = parts[6] if len(parts) > 6 and parts[6] != "none" else CODEC
+    CRF = parts[7] if len(parts) > 7 and parts[7] != "none" else CRF
+    PRESET = parts[8] if len(parts) > 8 and parts[8] != "none" else PRESET
+    POS = parts[9] if len(parts) > 9 and parts[9] != "none" else POS
+    SIZE = parts[10] if len(parts) > 10 and parts[10] != "none" else SIZE
+    MARGIN = parts[11] if len(parts) > 11 and parts[11] != "none" else MARGIN
+    raw_fonts = parts[12] if len(parts) > 12 and parts[12] != "none" else ""
+    if raw_fonts: FONT_IDS = raw_fonts.split(",")
 else:
     DUMP_ID = raw_dump
     LOGO_ID = "none"
@@ -97,7 +114,7 @@ async def progress_bar(current, total, app, msg_id, action_text, current_file_na
                 f"💾 Size: {current/(1024*1024):.1f} MB / {total/(1024*1024):.1f} MB\n"
                 f"⏱ ETA: {eta_str}\n"
                 "──────────────────────\n"
-                "🐍 " + sc("ʙᴏᴀ ʜᴀɴᴄᴏᴄᴋ ᴄʟᴏᴜᴅ ᴇɴɢɪɴᴇ")
+                "⚙️ Cloud Engine"
             )
             await app.edit_message_text(CHAT_ID, msg_id, text, reply_markup=cancel_kb)
             last_edit_time = now
@@ -148,6 +165,13 @@ async def download_phase():
             LOGO_ID, 
             progress=progress_bar, progress_args=(app, msg_id, "Dᴏᴡɴʟᴏᴀᴅɪɴɢ Lᴏɢᴏ", ORIG_NAME, logo_start_time)
         )
+
+    os.makedirs("fonts", exist_ok=True)
+    if FONT_IDS:
+        for idx, f_id in enumerate(FONT_IDS):
+            try:
+                await app.download_media(f_id, file_name=f"fonts/font_{idx}.ttf")
+            except: pass
         
     try:
         await app.edit_message_text(CHAT_ID, msg_id, sc("🔥 Sᴛᴀʀᴛɪɴɢ FFᴍᴘᴇɢ Eɴɢɪɴᴇ...\n"), reply_markup=cancel_kb)
@@ -163,53 +187,83 @@ async def encode_phase(video_path, sub_path, logo_path, msg_id):
     os.makedirs("fonts", exist_ok=True)
     
     if TASK_TYPE == "hardsub":
-        abs_sub = os.path.abspath(sub_path).replace('\\', '/').replace(':', '\\:') if sub_path else ""
-        fonts_dir = os.path.abspath("fonts").replace('\\', '/').replace(':', '\\:')
-        sub_filter = f"subtitles='{abs_sub}':fontsdir='{fonts_dir}'" if abs_sub else ""
+        res_map = {"1080p": 1080, "720p": 720, "480p": 480}
+        target_h = res_map.get(RESOLUTION, 1080) if RESOLUTION != "original" else None
+        
+        abs_sub = os.path.abspath(sub_path).replace('\\', '/').replace("'", r"\'").replace(':', '\\:') if sub_path else ""
+        fonts_dir = os.path.abspath("fonts").replace('\\', '/').replace("'", r"\'").replace(':', '\\:')
+        
+        filter_complex =[]
+        if target_h:
+            if abs_sub:
+                filter_complex.append(f"[0:v]scale=-2:{target_h},subtitles=filename='{abs_sub}':fontsdir='{fonts_dir}'[subbed]")
+            else:
+                filter_complex.append(f"[0:v]scale=-2:{target_h}[subbed]")
+        else:
+            if abs_sub:
+                filter_complex.append(f"[0:v]subtitles=filename='{abs_sub}':fontsdir='{fonts_dir}'[subbed]")
+            else:
+                filter_complex.append(f"[0:v]copy[subbed]") 
 
         if logo_path:
             abs_logo = os.path.abspath(logo_path).replace('\\', '/').replace(':', '\\:')
-            scale_val = "120:-1"
-            pos_val = "main_w-overlay_w-15:15"
+            s = float(SIZE) / 100
+            m = float(MARGIN) / 100
             
-            if sub_filter:
-                filter_complex = f"[1:v]scale={scale_val}[logo];[0:v]{sub_filter}[subbed];[subbed][logo]overlay={pos_val}[outv]"
-            else:
-                filter_complex = f"[1:v]scale={scale_val}[logo];[0:v][logo]overlay={pos_val}[outv]"
+            filter_complex.append(f"[1:v][subbed]scale2ref=w=main_w*{s}:h=ow/a[logo][main]")
+            
+            if POS == "Top Left": overlay = f"x=W*{m}:y=H*{m}"
+            elif POS == "Top Right": overlay = f"x=W-w-(W*{m}):y=H*{m}"
+            elif POS == "Bottom Left": overlay = f"x=W*{m}:y=H-h-(H*{m})"
+            elif POS == "Bottom Right": overlay = f"x=W-w-(W*{m}):y=H-h-(H*{m})"
+            else: overlay = f"x=(W-w)/2:y=(H-h)/2"
+            
+            filter_complex.append(f"[main][logo]overlay={overlay}[outv]")
             
             cmd =[
                 'ffmpeg', '-y', '-i', video_path, '-i', abs_logo,
-                '-filter_complex', filter_complex,
+                '-filter_complex', ";".join(filter_complex),
                 '-map', '[outv]', '-map', '0:a?', '-sn',
-                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-c:a', 'copy',
+                '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy',
                 '-progress', 'pipe:1', output
             ]
         else:
             cmd =[
-                'ffmpeg', '-y', '-i', video_path, '-sn', 
-                '-vf', sub_filter, 
-                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-c:a', 'copy',
+                'ffmpeg', '-y', '-i', video_path,
+                '-filter_complex', filter_complex[0].replace('[subbed]', '[outv]'),
+                '-map', '[outv]', '-map', '0:a?', '-sn',
+                '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy',
                 '-progress', 'pipe:1', output
-            ] if sub_filter else[
-                'ffmpeg', '-y', '-i', video_path, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-c:a', 'copy', '-progress', 'pipe:1', output
             ]
     else:
-        if RESOLUTION != "original":
-            vf_scale = f"scale=-2:{RESOLUTION}"
+        font_args =[]
+        if os.path.exists("fonts"):
+            for idx, f in enumerate(os.listdir("fonts")):
+                fp = os.path.join("fonts", f)
+                if not os.path.isfile(fp): continue
+                ext = os.path.splitext(f)[1].lower()
+                mtype = "application/x-truetype-font" if ext in ['.ttf', '.ttc'] else "application/vnd.ms-opentype" if ext == '.otf' else ""
+                if mtype: font_args.extend(["-attach", fp, f"-metadata:s:t:{idx}", f"mimetype={mtype}"])
+
+        if TASK_TYPE == "mux":
+            sub_codec = 'ass' if (sub_path and sub_path.lower().endswith('.ass')) else 'subrip'
             cmd =[
-                'ffmpeg', '-y', '-i', video_path, 
-                '-map', '0:v', '-map', '0:a?', '-map', '0:s?', 
-                '-vf', vf_scale,
-                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-c:a', 'copy', '-c:s', 'copy',
-                '-progress', 'pipe:1', output
-            ]
+                'ffmpeg', '-y', '-i', video_path, '-i', sub_path,
+                '-map', '0:v', '-map', '0:a?', '-map', '1:0',
+                '-c:v', 'copy', '-c:a', 'copy', '-c:s', sub_codec,
+                '-disposition:s:0', 'default', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Hinglish'
+            ] + font_args +['-progress', 'pipe:1', output]
         else:
-            cmd =[
-                'ffmpeg', '-y', '-i', video_path, 
-                '-map', '0:v', '-map', '0:a?', '-map', '0:s?', 
-                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-c:a', 'copy', '-c:s', 'copy',
+            res_map = {"1080p": 1080, "720p": 720, "480p": 480}
+            target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
+            vf_scale = f"-vf scale=-2:{target_h}" if target_h else ""
+            
+            cmd =['ffmpeg', '-y', '-i', video_path, '-map', '0:v', '-map', '0:a?', '-map', '0:s?']
+            if vf_scale: cmd.extend(['-vf', f'scale=-2:{target_h}'])
+            cmd.extend([
+                '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-c:s', 'copy',
                 '-progress', 'pipe:1', output
-            ]
+            ])
 
     app = Client("worker_enc", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
@@ -250,7 +304,7 @@ async def encode_phase(video_path, sub_path, logo_path, msg_id):
                         f"💾 Time: {get_readable_time(cur)} / {get_readable_time(duration)}\n"
                         f"⏱ ETA: {eta_str}\n"
                         "──────────────────────\n"
-                        "🐍 " + sc("ʙᴏᴀ ʜᴀɴᴄᴏᴄᴋ ᴄʟᴏᴜᴅ ᴇɴɢɪɴᴇ")
+                        "⚙️ Cloud Engine"
                     )
                     try: await app.edit_message_text(CHAT_ID, msg_id, text, reply_markup=cancel_kb)
                     except: pass
@@ -306,7 +360,6 @@ async def upload_phase(output, returncode, msg_id):
             await app.delete_messages(CHAT_ID,[msg_id])
         except Exception as e:
             try:
-                # Fallback upload in case reply_to_message_id is invalid/deleted
                 await app.send_document(
                     chat_id=target_chat, document=output,
                     thumb=thumb_path if has_thumb else None, caption=cap,
