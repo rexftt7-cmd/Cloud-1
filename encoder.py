@@ -210,7 +210,8 @@ async def encode_phase(video_path, sub_path, logo_path, msg_id):
             s = float(SIZE) / 100
             m = float(MARGIN) / 100
             
-            filter_complex.append(f"[1:v][subbed]scale2ref=w=main_w*{s}:h=ow/a[logo][main]")
+            # Using ih/iw to strictly preserve logo aspect ratio dynamically
+            filter_complex.append(f"[1:v][subbed]scale2ref=w='main_w*{s}':h='ow*ih/iw'[logo][main]")
             
             if POS == "Top Left": overlay = f"x=W*{m}:y=H*{m}"
             elif POS == "Top Right": overlay = f"x=W-w-(W*{m}):y=H*{m}"
