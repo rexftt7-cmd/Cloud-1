@@ -144,7 +144,7 @@ async def download_phase(app):
     video_path = await app.download_media(VIDEO_ID, file_name="video.mkv", progress=progress_bar, progress_args=(app, msg_id, "Downloading Video", ORIG_NAME, dl_start_time))
     
     sub_path = None
-    if TASK_TYPE == "hardsub" and SUB_ID != "none":
+    if TASK_TYPE in ["hardsub", "mux"] and SUB_ID != "none":
         sub_start_time = time.time()
         sub_path = await app.download_media(SUB_ID, progress=progress_bar, progress_args=(app, msg_id, "Downloading Subtitle", ORIG_NAME, sub_start_time))
         
@@ -212,14 +212,14 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
                 target_h = res_map.get(res)
                 if target_h:
                     filter_complex.append(f"[v{i}]scale=-2:{target_h}[out_{res}]")
-                    out_streams.append(f"[out_{res}]")
-                else: out_streams.append(f"[v{i}]")
+                    out_streams.append(f"out_{res}")
+                else: out_streams.append(f"v{i}")
         else:
             target_h = res_map.get(res_list[0])
             if target_h:
                 filter_complex.append(f"{current_v}scale=-2:{target_h}[out_{res_list[0]}]")
-                out_streams = [f"[out_{res_list[0]}]"]
-            else: out_streams = [current_v]
+                out_streams = [f"out_{res_list[0]}"]
+            else: out_streams = [current_v.strip("[]")]
 
         if filter_complex: cmd.extend(['-filter_complex', ";".join(filter_complex)])
         cmd.extend(['-progress', 'pipe:1'])
@@ -243,7 +243,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
 
         if filter_complex: cmd.extend(['-filter_complex', ";".join(filter_complex)])
         
-        map_str = current_v if filter_complex else "0:v"
+        map_str = current_v.strip('[]') if filter_complex else "0:v"
         cmd.extend(['-map', map_str, '-map', '0:a?'])
         out_file = RENAME
         cmd.extend(['-sn', '-c:v', 'libx264', '-preset', PRESET, '-crf', str(CRF), '-c:a', 'copy', '-progress', 'pipe:1', out_file])
@@ -252,7 +252,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
     elif TASK_TYPE == "mux":
         sub_codec = 'ass' if (sub_path and sub_path.lower().endswith('.ass')) else 'subrip'
         if filter_complex: cmd.extend(['-filter_complex', filter_complex[0]])
-        v_map = "[wm_out]" if filter_complex else "0:v"
+        v_map = current_v.strip('[]') if filter_complex else "0:v"
         cmd.extend(['-map', v_map, '-map', '0:a?', '-map', '1:0', '-c:v', 'copy', '-c:a', 'copy', '-c:s', sub_codec])
         cmd.extend(['-disposition:s:0', 'default', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Hinglish'])
         cmd.extend(font_args)
@@ -318,7 +318,6 @@ async def upload_phase(app, outputs, returncode, msg_id):
             target_chat = int(DUMP_ID) if DUMP_ID != "none" else CHAT_ID
             thread = int(THREAD_ID) if THREAD_ID != "none" else None
             
-            # Identify quality from filename
             quality = "ORIGINAL"
             for q in ["1080p", "720p", "480p", "360p"]:
                 if q in out: quality = q; break
