@@ -49,9 +49,9 @@ if ":::" in raw_dump:
     raw_fonts = parts[8] if len(parts) > 8 and parts[8] != "none" else ""
     if raw_fonts: FONT_IDS = raw_fonts.split(",")
     
-    WM_TYPE = parts[9] if len(parts) > 9 and parts[9] != "none" else None
-    WM_POS = parts[11] if len(parts) > 11 and parts[11] != "none" else "top-right"
-    try: WM_SIZE = int(parts[12]) if len(parts) > 12 else 25
+    WM_TYPE = parts[9] if len(parts) > 9 and parts[9] not in ["none", "None"] else None
+    WM_POS = parts[10] if len(parts) > 10 and parts[10] != "none" else "top-right"
+    try: WM_SIZE = int(parts[11]) if len(parts) > 11 else 25
     except: WM_SIZE = 25
 else:
     DUMP_ID = raw_dump
@@ -226,7 +226,8 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
 
         for i, res in enumerate(res_list):
             out_file = f"{base_name} {res}{ext}"
-            cmd.extend(['-map', out_streams[i], '-map', '0:a?', '-map', '0:s?'])
+            map_str = out_streams[i] if filter_complex else "0:v"
+            cmd.extend(['-map', map_str, '-map', '0:a?', '-map', '0:s?'])
             cmd.extend(['-c:v', 'libx264', '-preset', PRESET, '-crf', str(CRF), '-c:a', 'copy', '-c:s', 'copy'])
             cmd.append(out_file)
             outputs.append(out_file)
@@ -241,14 +242,15 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
             current_v = "[subbed]"
 
         if filter_complex: cmd.extend(['-filter_complex', ";".join(filter_complex)])
-        cmd.extend(['-map', current_v, '-map', '0:a?'])
+        
+        map_str = current_v if filter_complex else "0:v"
+        cmd.extend(['-map', map_str, '-map', '0:a?'])
         out_file = RENAME
         cmd.extend(['-sn', '-c:v', 'libx264', '-preset', PRESET, '-crf', str(CRF), '-c:a', 'copy', '-progress', 'pipe:1', out_file])
         outputs.append(out_file)
 
     elif TASK_TYPE == "mux":
         sub_codec = 'ass' if (sub_path and sub_path.lower().endswith('.ass')) else 'subrip'
-        cmd = ['ffmpeg', '-y', '-fflags', '+genpts', '-i', video_path, '-i', sub_path]
         if filter_complex: cmd.extend(['-filter_complex', filter_complex[0]])
         v_map = "[wm_out]" if filter_complex else "0:v"
         cmd.extend(['-map', v_map, '-map', '0:a?', '-map', '1:0', '-c:v', 'copy', '-c:a', 'copy', '-c:s', sub_codec])
@@ -316,6 +318,7 @@ async def upload_phase(app, outputs, returncode, msg_id):
             target_chat = int(DUMP_ID) if DUMP_ID != "none" else CHAT_ID
             thread = int(THREAD_ID) if THREAD_ID != "none" else None
             
+            # Identify quality from filename
             quality = "ORIGINAL"
             for q in ["1080p", "720p", "480p", "360p"]:
                 if q in out: quality = q; break
