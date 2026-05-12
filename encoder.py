@@ -130,7 +130,7 @@ async def download_phase(app):
     
     dl_start_time = time.time()
     video_path = await app.download_media(
-        VIDEO_ID, file_name="video.mkv", 
+        VIDEO_ID, file_name="video.mp4", 
         progress=progress_bar, progress_args=(app, msg_id, "Downloading Video", ORIG_NAME, dl_start_time)
     )
     
@@ -182,25 +182,63 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         ])
 
     elif TASK_TYPE == "mux":
-        font_args =[]
-        if os.path.exists("fonts"):
-            for idx, f in enumerate(os.listdir("fonts")):
-                fp = os.path.join("fonts", f)
-                if not os.path.isfile(fp): continue
-                ext = os.path.splitext(f)[1].lower()
-                mtype = "application/x-truetype-font" if ext in['.ttf', '.ttc'] else "application/vnd.ms-opentype" if ext == '.otf' else ""
-                if mtype: font_args.extend(["-attach", fp, f"-metadata:s:t:{idx}", f"mimetype={mtype}"])
-        
-        sub_codec = 'ass' if (sub_path and sub_path.lower().endswith('.ass')) else 'subrip'
+    font_args = []
 
-        cmd =[
-            'ffmpeg', '-y', '-ignore_editlist', '1', '-fflags', '+genpts', '-i', video_path, '-i', sub_path,
-            '-map', '0:v', '-map', '0:a?', '-map', '1:0',
-            '-c:v', 'copy', '-c:a', 'copy', '-c:s', sub_codec,
-            '-avoid_negative_ts', 'make_non_negative', '-map_metadata', '-1',
-            '-max_muxing_queue_size', '1024',
-            '-disposition:s:0', 'default', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Hinglish'
-        ] + font_args +['-progress', 'pipe:1', output]
+    if os.path.exists("fonts"):
+        for idx, f in enumerate(os.listdir("fonts")):
+            fp = os.path.join("fonts", f)
+            if not os.path.isfile(fp):
+                continue
+
+            ext = os.path.splitext(f)[1].lower()
+
+            if ext in ['.ttf', '.ttc']:
+                mtype = "application/x-truetype-font"
+            elif ext == '.otf':
+                mtype = "application/vnd.ms-opentype"
+            else:
+                continue
+
+            font_args.extend([
+                "-attach", fp,
+                f"-metadata:s:t:{idx}", f"mimetype={mtype}"
+            ])
+
+    sub_codec = 'ass' if (
+        sub_path and sub_path.lower().endswith('.ass')
+    ) else 'subrip'
+
+    cmd = [
+        'ffmpeg',
+        '-y',
+
+        '-fflags', '+genpts',
+
+        '-i', video_path,
+        '-i', sub_path,
+
+        '-map', '0:v:0',
+        '-map', '0:a?',
+        '-map', '1:0',
+
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-c:s', sub_codec,
+
+        '-map_metadata', '-1',
+
+        '-avoid_negative_ts', 'make_zero',
+        '-reset_timestamps', '1',
+
+        '-max_muxing_queue_size', '4096',
+
+        '-disposition:s:0', 'default',
+        '-metadata:s:s:0', 'language=eng',
+        '-metadata:s:s:0', 'title=Hinglish'
+    ] + font_args + [
+        '-progress', 'pipe:1',
+        output
+    ]
 
     else:
         target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
