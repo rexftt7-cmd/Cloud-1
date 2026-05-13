@@ -76,6 +76,16 @@ async def get_duration(file_path):
     except:
         return 0.0
 
+async def get_video_dimensions(file_path):
+    cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', file_path]
+    try:
+        proc = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        stdout, _ = await proc.communicate()
+        w, h = map(int, stdout.decode().strip().split('x'))
+        return w, h
+    except:
+        return 1280, 720
+
 async def progress_bar(current, total, app, msg_id, action_text, current_file_name, start_time):
     global last_edit_time
     now = time.time()
@@ -180,9 +190,18 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         logo_path = safe_logo
     
     res_map = {"1080p": 1080, "720p": 720, "480p": 480}
+    target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
+    
+    orig_w, orig_h = await get_video_dimensions(video_path)
+    if target_h and orig_h > 0:
+        new_w = int(orig_w * (target_h / orig_h))
+    else:
+        new_w = orig_w
+        
+    logo_w = int(new_w * 0.12)
+    if logo_w < 50: logo_w = 120
     
     if TASK_TYPE == "compress":
-        target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
         cmd =['ffmpeg', '-y', '-i', video_path, '-map', '0:v', '-map', '0:a?', '-map', '0:s?']
         if target_h:
             cmd.extend(['-vf', f'scale=-2:{target_h}'])
@@ -255,9 +274,6 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         ]
 
     else:
-        # EXACT OLD REPO LOGIC FOR HARDSUB
-        target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
-
         abs_sub = os.path.abspath(sub_path).replace('\\', '/').replace(':', '\\:') if sub_path else ""
         fonts_dir = os.path.abspath("fonts").replace('\\', '/').replace(':', '\\:')
         
@@ -271,7 +287,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
 
         if logo_path and LOGO_ID != "none" and os.path.exists(logo_path):
             abs_logo = os.path.abspath(logo_path).replace('\\', '/').replace(':', '\\:')
-            scale_val = "120:-1"
+            scale_val = f"{logo_w}:-1"
             pos_val = "main_w-overlay_w-15:15"
 
             if sub_filter:
